@@ -14,7 +14,7 @@ class VideoSplitterApp(ctk.CTk):
         super().__init__()
 
         self.title("Video Splitter - 5 Seconds")
-        self.geometry("650x450")
+        self.geometry("650x500")
         
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -23,6 +23,7 @@ class VideoSplitterApp(ctk.CTk):
         self.video_path_var = ctk.StringVar()
         self.output_dir_var = ctk.StringVar()
         self.project_name_var = ctk.StringVar()
+        self.split_time_var = ctk.StringVar(value="5")
 
         # --- UI Elements ---
         self.grid_columnconfigure(1, weight=1)
@@ -53,17 +54,40 @@ class VideoSplitterApp(ctk.CTk):
         self.entry_project = ctk.CTkEntry(self, textvariable=self.project_name_var, width=300)
         self.entry_project.grid(row=3, column=1, padx=(0, 20), pady=10, sticky="ew")
 
+        # Split Time
+        self.lbl_split_time = ctk.CTkLabel(self, text="Split Time (Seconds):")
+        self.lbl_split_time.grid(row=4, column=0, padx=20, pady=10, sticky="w")
+        self.entry_split_time = ctk.CTkEntry(self, textvariable=self.split_time_var, width=300)
+        self.entry_split_time.grid(row=4, column=1, padx=(0, 20), pady=10, sticky="ew")
+        self.lbl_max_time = ctk.CTkLabel(self, text="", text_color="gray")
+        self.lbl_max_time.grid(row=4, column=2, padx=(0, 20), pady=10, sticky="w")
+
         # Progress
         self.lbl_status = ctk.CTkLabel(self, text="Ready", text_color="gray")
-        self.lbl_status.grid(row=4, column=0, columnspan=3, padx=20, pady=(20, 5))
+        self.lbl_status.grid(row=5, column=0, columnspan=3, padx=20, pady=(20, 5))
         
         self.progress_bar = ctk.CTkProgressBar(self)
-        self.progress_bar.grid(row=5, column=0, columnspan=3, padx=40, pady=10, sticky="ew")
+        self.progress_bar.grid(row=6, column=0, columnspan=3, padx=40, pady=10, sticky="ew")
         self.progress_bar.set(0)
 
         # Start Button
-        self.btn_start = ctk.CTkButton(self, text="Start Splitting (5 Sec)", command=self.start_splitting_thread, height=40, font=("Helvetica", 14, "bold"))
-        self.btn_start.grid(row=6, column=0, columnspan=3, padx=20, pady=20)
+        self.btn_start = ctk.CTkButton(self, text="Start Splitting", command=self.start_splitting_thread, height=40, font=("Helvetica", 14, "bold"), state="disabled")
+        self.btn_start.grid(row=7, column=0, columnspan=3, padx=20, pady=20)
+
+        # Add traces to validate fields dynamically
+        self.video_path_var.trace_add("write", self.check_fields)
+        self.output_dir_var.trace_add("write", self.check_fields)
+        self.project_name_var.trace_add("write", self.check_fields)
+        self.split_time_var.trace_add("write", self.check_fields)
+
+    def check_fields(self, *args):
+        if (self.video_path_var.get().strip() and 
+            self.output_dir_var.get().strip() and 
+            self.project_name_var.get().strip() and 
+            self.split_time_var.get().strip()):
+            self.btn_start.configure(state="normal")
+        else:
+            self.btn_start.configure(state="disabled")
 
     def browse_video(self):
         filename = filedialog.askopenfilename(
@@ -72,6 +96,19 @@ class VideoSplitterApp(ctk.CTk):
         )
         if filename:
             self.video_path_var.set(filename)
+            self.update_max_time_label(filename)
+            
+    def update_max_time_label(self, video_path):
+        try:
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            duration = self.get_video_duration(ffmpeg_exe, video_path)
+            if duration > 0:
+                max_split_time = max(1.0, duration - 5.0)
+                self.lbl_max_time.configure(text=f"(Max: {max_split_time:.1f}s)")
+            else:
+                self.lbl_max_time.configure(text="")
+        except Exception:
+            self.lbl_max_time.configure(text="")
 
     def browse_output(self):
         directory = filedialog.askdirectory(title="Select Output Directory")
@@ -82,6 +119,7 @@ class VideoSplitterApp(ctk.CTk):
         video_path = self.video_path_var.get()
         output_dir = self.output_dir_var.get()
         project_name = self.project_name_var.get()
+        split_time_str = self.split_time_var.get()
 
         if not video_path or not os.path.exists(video_path):
             messagebox.showerror("Error", "Please select a valid video file.")
@@ -92,17 +130,25 @@ class VideoSplitterApp(ctk.CTk):
         if not project_name:
             messagebox.showerror("Error", "Please enter a project name.")
             return
+            
+        try:
+            split_time = float(split_time_str)
+            if split_time < 1:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid splitting time (minimum 1 second).")
+            return
 
         self.btn_start.configure(state="disabled")
         self.progress_bar.set(0)
         self.lbl_status.configure(text="Initializing ffmpeg...", text_color="white")
         
         # Run in a separate thread so GUI doesn't freeze
-        thread = threading.Thread(target=self.split_video, args=(video_path, output_dir, project_name))
+        thread = threading.Thread(target=self.split_video, args=(video_path, output_dir, project_name, split_time))
         thread.daemon = True
         thread.start()
 
-    def split_video(self, video_path, output_dir, project_name):
+    def split_video(self, video_path, output_dir, project_name, split_time):
         try:
             # imageio_ffmpeg provides an ffmpeg executable path even if not installed on system
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -118,7 +164,12 @@ class VideoSplitterApp(ctk.CTk):
                 self.update_gui_error("Could not determine video duration. The file might be corrupted or not a valid video.")
                 return
 
-            clip_duration = 5 # seconds
+            max_split_time = max(1.0, duration - 5.0)
+            if split_time > max_split_time:
+                self.update_gui_error(f"Split time too large. Maximum allowed for this video is {max_split_time:.1f} seconds.")
+                return
+
+            clip_duration = split_time # seconds
             total_clips = math.ceil(duration / clip_duration)
             
             # We use ffmpeg's segment muxer. -c copy is very fast and doesn't re-encode,
