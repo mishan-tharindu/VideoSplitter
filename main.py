@@ -116,10 +116,10 @@ class VideoSplitterApp(ctk.CTk):
             self.output_dir_var.set(directory)
 
     def start_splitting_thread(self):
-        video_path = self.video_path_var.get()
-        output_dir = self.output_dir_var.get()
-        project_name = self.project_name_var.get()
-        split_time_str = self.split_time_var.get()
+        video_path = self.video_path_var.get().strip()
+        output_dir = self.output_dir_var.get().strip()
+        project_name = self.project_name_var.get().strip()
+        split_time_str = self.split_time_var.get().strip()
 
         if not video_path or not os.path.exists(video_path):
             messagebox.showerror("Error", "Please select a valid video file.")
@@ -227,7 +227,22 @@ class VideoSplitterApp(ctk.CTk):
         self.progress_bar.set(1.0)
         self.lbl_status.configure(text="Finished!", text_color="green")
         messagebox.showinfo("Success", message)
-        self.btn_start.configure(state="normal")
+        self.btn_start.configure(state="normal", text="Reset", command=self.reset_ui)
+
+    def reset_ui(self):
+        # Reset variables (this triggers check_fields and disables the button)
+        self.video_path_var.set("")
+        self.output_dir_var.set("")
+        self.project_name_var.set("")
+        self.split_time_var.set("5")
+        
+        # Reset UI labels and progress
+        self.lbl_max_time.configure(text="")
+        self.lbl_status.configure(text="Ready", text_color="gray")
+        self.progress_bar.set(0)
+        
+        # Restore button
+        self.btn_start.configure(text="Start Splitting", command=self.start_splitting_thread)
 
     def update_gui_error(self, message):
         self.after(0, self._update_gui_error, message)
